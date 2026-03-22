@@ -1,0 +1,244 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - name: string (required)
+    //   - email: string (required)
+    //   - role: string (required, 'admin' or 'user')
+    //   - createdAt: timestamp (required, immutable)
+    //
+    // Collection: tasks
+    // Document ID: {taskId}
+    // Fields:
+    //   - title: string (required, max 200 chars)
+    //   - date: timestamp (required)
+    //   - type: string (required, 'daily', 'weekly', 'monthly', 'event')
+    //   - status: string (required, 'pending', 'in-progress', 'completed')
+    //   - completedDates: list of strings (optional)
+    //   - userId: string (required, immutable)
+    //   - createdAt: timestamp (required, immutable)
+    //
+    // Collection: protocols
+    // Document ID: {protocolId}
+    // Fields:
+    //   - title: string (required, max 200 chars)
+    //   - aim: string (required, max 1000 chars)
+    //   - reagents: string (optional, max 5000 chars)
+    //   - procedure: string (optional, max 10000 chars)
+    //   - observation: string (optional, max 5000 chars)
+    //   - note: string (optional, max 5000 chars)
+    //   - result: string (optional, max 5000 chars)
+    //   - userId: string (required, immutable)
+    //   - createdAt: timestamp (required, immutable)
+    //
+    // Collection: reagents
+    // Document ID: {reagentId}
+    // Fields:
+    //   - name: string (required, max 200 chars)
+    //   - quantity: number (required, >= 0)
+    //   - unit: string (required, max 50 chars)
+    //   - location: string (required, max 200 chars)
+    //   - userId: string (required, immutable)
+    //   - createdAt: timestamp (required, immutable)
+    //
+    // Collection: datasets
+    // Document ID: {datasetId}
+    // Fields:
+    //   - name: string (required, max 200 chars)
+    //   - data: string (required, max 50000 chars) // JSON stringified data
+    //   - userId: string (required, immutable)
+    //   - createdAt: timestamp (required, immutable)
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.userId;
+    }
+
+    function uidUnchanged() {
+      return !('userId' in request.resource.data) || request.resource.data.userId == request.auth.uid;
+    }
+
+    function uidNotModified() {
+      return !('userId' in request.resource.data) || request.resource.data.userId == resource.data.userId;
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function validStringLength(field, minLen, maxLen) {
+      return request.resource.data[field] is string &&
+        request.resource.data[field].size() >= minLen &&
+        request.resource.data[field].size() <= maxLen;
+    }
+
+    function isValidOptionalString(field, minLen, maxLen) {
+      return !(field in request.resource.data) ||
+             (request.resource.data[field] is string &&
+              request.resource.data[field].size() >= minLen &&
+              request.resource.data[field].size() <= maxLen);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isEncryptedPayload(data) {
+      let allowedFields = ['userId', 'createdAt', '_encrypted', 'payload', 'id'];
+      return data.keys().hasAll(['userId', 'createdAt', '_encrypted', 'payload']) &&
+             data.keys().hasOnly(allowedFields) &&
+             data._encrypted == true &&
+             data.payload is string &&
+             data.payload.size() <= 1000000 &&
+             data.userId == request.auth.uid &&
+             data.createdAt is timestamp;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "mohanduratkar36@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['name', 'email', 'role', 'createdAt']) &&
+             validStringLength('name', 1, 100) &&
+             isValidEmail(data.email) &&
+             data.role in ['admin', 'user'] &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidTask(data) {
+      let allowedFields = ['title', 'date', 'type', 'status', 'userId', 'createdAt', 'completedDates', 'reminderTime', 'emailNotification', 'id'];
+      
+      return ('_encrypted' in data && data._encrypted == true) ? isEncryptedPayload(data) : (
+             data.keys().hasAll(['title', 'date', 'type', 'status', 'userId', 'createdAt']) &&
+             data.keys().hasOnly(allowedFields) &&
+             validStringLength('title', 1, 200) &&
+             (data.date is timestamp || data.date is string) &&
+             data.type in ['daily', 'weekly', 'monthly', 'event'] &&
+             data.status in ['pending', 'in-progress', 'completed'] &&
+             (!('completedDates' in data) || (data.completedDates is list && data.completedDates.size() <= 1000)) &&
+             (!('reminderTime' in data) || (data.reminderTime is string && data.reminderTime.size() <= 10)) &&
+             (!('emailNotification' in data) || data.emailNotification is bool) &&
+             data.userId == request.auth.uid &&
+             data.createdAt is timestamp);
+    }
+
+    function isValidProtocol(data) {
+      return ('_encrypted' in data && data._encrypted == true) ? isEncryptedPayload(data) : (
+             data.keys().hasOnly(['title', 'aim', 'reagents', 'procedure', 'observation', 'note', 'result', 'userId', 'createdAt', 'id']) &&
+             validStringLength('title', 1, 200) &&
+             validStringLength('aim', 1, 1000) &&
+             isValidOptionalString('reagents', 0, 5000) &&
+             isValidOptionalString('procedure', 0, 10000) &&
+             isValidOptionalString('observation', 0, 5000) &&
+             isValidOptionalString('note', 0, 5000) &&
+             isValidOptionalString('result', 0, 5000) &&
+             data.userId == request.auth.uid &&
+             data.createdAt is timestamp);
+    }
+
+    function isValidReagent(data) {
+      return ('_encrypted' in data && data._encrypted == true) ? isEncryptedPayload(data) : (
+             data.keys().hasOnly(['name', 'quantity', 'unit', 'location', 'userId', 'createdAt', 'id']) &&
+             validStringLength('name', 1, 200) &&
+             data.quantity is number && data.quantity >= 0 &&
+             validStringLength('unit', 1, 50) &&
+             validStringLength('location', 1, 200) &&
+             data.userId == request.auth.uid &&
+             data.createdAt is timestamp);
+    }
+
+    function isValidDataset(data) {
+      return ('_encrypted' in data && data._encrypted == true) ? isEncryptedPayload(data) : (
+             data.keys().hasOnly(['name', 'data', 'userId', 'createdAt', 'id']) &&
+             validStringLength('name', 1, 200) &&
+             validStringLength('data', 1, 500000) && // Up to 500k chars for CSV
+             data.userId == request.auth.uid &&
+             data.createdAt is timestamp);
+    }
+
+    function isValidNote(data) {
+      return ('_encrypted' in data && data._encrypted == true) ? isEncryptedPayload(data) : (
+             data.keys().hasAll(['title', 'content', 'type', 'date', 'userId', 'createdAt']) &&
+             data.keys().hasOnly(['title', 'content', 'type', 'date', 'userId', 'createdAt', 'id']) &&
+             validStringLength('title', 1, 200) &&
+             validStringLength('content', 1, 50000) &&
+             data.type in ['daily_report', 'experiment_result', 'general'] &&
+             (data.date is timestamp || data.date is string) &&
+             data.userId == request.auth.uid &&
+             data.createdAt is timestamp);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+    
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) && ((request.resource.data.role == 'user') || isAdmin());
+      allow update: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) && ((request.resource.data.role == resource.data.role) || isAdmin()) && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isAdmin();
+    }
+
+    match /tasks/{taskId} {
+      allow read: if isDocOwner();
+      allow create: if isAuthenticated() && isValidTask(request.resource.data) && uidUnchanged();
+      allow update: if isDocOwner() && isValidTask(request.resource.data) && uidNotModified() && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isDocOwner();
+    }
+
+    match /protocols/{protocolId} {
+      allow read: if isDocOwner();
+      allow create: if isAuthenticated() && isValidProtocol(request.resource.data) && uidUnchanged();
+      allow update: if isDocOwner() && isValidProtocol(request.resource.data) && uidNotModified() && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isDocOwner();
+    }
+
+    match /reagents/{reagentId} {
+      allow read: if isDocOwner();
+      allow create: if isAuthenticated() && isValidReagent(request.resource.data) && uidUnchanged();
+      allow update: if isDocOwner() && isValidReagent(request.resource.data) && uidNotModified() && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isDocOwner();
+    }
+
+    match /datasets/{datasetId} {
+      allow read: if isDocOwner();
+      allow create: if isAuthenticated() && isValidDataset(request.resource.data) && uidUnchanged();
+      allow update: if isDocOwner() && isValidDataset(request.resource.data) && uidNotModified() && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isDocOwner();
+    }
+
+    match /notes/{noteId} {
+      allow read: if isDocOwner();
+      allow create: if isAuthenticated() && isValidNote(request.resource.data) && uidUnchanged();
+      allow update: if isDocOwner() && isValidNote(request.resource.data) && uidNotModified() && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isDocOwner();
+    }
+  }
+}

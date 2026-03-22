@@ -1,0 +1,98 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A registered user of the lab application.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["admin", "user"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "email", "role", "createdAt"]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "A lab planner task.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "type": { "type": "string", "enum": ["daily", "weekly", "monthly", "event"] },
+        "status": { "type": "string", "enum": ["pending", "in-progress", "completed"] },
+        "completedDates": { "type": "array", "items": { "type": "string" } },
+        "reminderTime": { "type": "string" },
+        "emailNotification": { "type": "boolean" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "date", "type", "status", "userId", "createdAt"]
+    },
+    "Protocol": {
+      "title": "Protocol",
+      "description": "An experiment protocol and log.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "aim": { "type": "string" },
+        "reagents": { "type": "string" },
+        "procedure": { "type": "string" },
+        "observation": { "type": "string" },
+        "note": { "type": "string" },
+        "result": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "aim", "userId", "createdAt"]
+    },
+    "Reagent": {
+      "title": "Reagent",
+      "description": "A tracked reagent in the inventory.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "quantity": { "type": "number" },
+        "unit": { "type": "string" },
+        "location": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "quantity", "unit", "location", "userId", "createdAt"]
+    },
+    "Dataset": {
+      "title": "Dataset",
+      "description": "Saved data for visualization.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "data": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "data", "userId", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles."
+    },
+    "/tasks/{taskId}": {
+      "schema": { "$ref": "#/entities/Task" },
+      "description": "Lab tasks."
+    },
+    "/protocols/{protocolId}": {
+      "schema": { "$ref": "#/entities/Protocol" },
+      "description": "Lab protocols."
+    },
+    "/reagents/{reagentId}": {
+      "schema": { "$ref": "#/entities/Reagent" },
+      "description": "Reagent inventory."
+    },
+    "/datasets/{datasetId}": {
+      "schema": { "$ref": "#/entities/Dataset" },
+      "description": "Saved datasets for visualization."
+    }
+  }
+}
